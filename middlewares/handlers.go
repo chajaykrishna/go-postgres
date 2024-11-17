@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 type respose struct {
@@ -38,7 +39,6 @@ func createConnection() *sql.DB {
 
 func CreateNewStock(w http.ResponseWriter, r *http.Request) {
 	var stock models.Stock
-
 	err := json.NewDecoder(r.Body).Decode(&stock)
 	if err != nil {
 		log.Fatalf("unable to decode the request body. %v", err)
@@ -59,7 +59,28 @@ func GetAllStocks(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(stocks)
 
 }
-func UpdateStock(w http.ResponseWriter, r *http.Request) {}
+func UpdateStock(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	stockid, err := strconv.Atoi(params["id"])
+	if err != nil {
+		log.Fatalf("error converting stockid to int. %v", err)
+	}
+	var stock models.Stock
+	json.NewDecoder(r.Body).Decode(&stock)
+
+	updatedRows := updateStock(stockid, stock)
+
+	if err != nil {
+		log.Fatalf("error while updating the stock. %v", err)
+	}
+	msg := fmt.Sprintf("stock updated. total rows affected: %v", updatedRows)
+	res := respose{
+		ID:      int64(stockid),
+		Message: msg,
+	}
+	json.NewEncoder(w).Encode(res)
+}
+
 func GetStock(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	stockId, err := strconv.Atoi(params["id"])
@@ -72,7 +93,21 @@ func GetStock(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewEncoder(w).Encode(stock)
 }
-func DeleteStock() {}
+func DeleteStock(w http.ResponseWriter, r *http.Request) {
+	param := mux.Vars(r)
+	stockid, err := strconv.Atoi(param["id"])
+	if err != nil {
+		log.Fatalf("invalid stock id, %v", err)
+	}
+
+	id := deleteStock(int64(stockid))
+	msg := fmt.Sprintf("stock successfully deleted. id: %v", id)
+	res := respose{
+		ID:      id,
+		Message: msg,
+	}
+	json.NewEncoder(w).Encode(res)
+}
 
 // db actions
 
@@ -83,7 +118,7 @@ func insertStock(stock models.Stock) int64 {
 	sqlstatement := `INSERT into stocks(name, price, company) values ($1, $2, $3) returning stockid`
 	var id int64
 
-	err := db.QueryRow(sqlstatement, stock.Name, stock.Company, stock.Price).Scan(id)
+	err := db.QueryRow(sqlstatement, stock.Name, stock.Price, stock.Company).Scan(&id)
 	if err != nil {
 		log.Fatalf("error executing insert stock query. %v", err)
 	}
@@ -138,4 +173,39 @@ func getAllStocks() ([]models.Stock, error) {
 	}
 
 	return stocks, err
+}
+
+func updateStock(stockid int, updatedstock models.Stock) int64 {
+	db := createConnection()
+	defer db.Close()
+
+	sqlStatement := `update stocks set name=$2, price=$3, company=$4 where stockid=$1`
+
+	res, err := db.Exec(sqlStatement, stockid, updatedstock.Name, updatedstock.Price, updatedstock.Company)
+
+	if err != nil {
+		log.Fatalf("unable to execute the query")
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		log.Fatalf("Error while updating the stock. %v", err)
+	}
+	return rowsAffected
+}
+
+func deleteStock(stockid int64) int64 {
+	db := createConnection()
+	defer db.Close()
+
+	sqlStatement := `delete from stocks where stockid=$1`
+	res, err := db.Exec(sqlStatement, stockid)
+	if err != nil {
+		log.Fatalf("Error while executing the delete query. %v", err)
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		log.Fatalf("Error while checking the affected rows. %v", err)
+	}
+
+	return rowsAffected
 }
